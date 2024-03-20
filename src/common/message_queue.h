@@ -10,7 +10,7 @@
 
 typedef struct MessageQueue MessageQueue;
 
-MessageQueue *MessageQueue_new(const Queue *queue);
+MessageQueue *MessageQueue_new(Queue *queue);
 void MessageQueue_delete(MessageQueue *message_queue);
 
 const void *MessageQueue_wait(MessageQueue *message_queue);

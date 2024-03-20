@@ -7,12 +7,12 @@
 #include "common/message_queue.h"
 
 typedef struct MessageQueue {
-    const Queue *queue;
+    Queue *queue;
     pthread_cond_t cond;
     pthread_mutex_t mutex;
 } MessageQueue;
 
-MessageQueue *MessageQueue_new(const Queue *queue)
+MessageQueue *MessageQueue_new(Queue *queue)
 {
     MessageQueue *message_queue = malloc(sizeof(MessageQueue));
     if (!message_queue) {

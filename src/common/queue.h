@@ -7,11 +7,11 @@
 #include <stdlib.h>
 
 typedef struct Queue {
-    const void *(*pop)(const struct Queue *queue);
-    int (*push)(const struct Queue *queue, const void *data);
+    const void *(*pop)(struct Queue *queue);
+    int (*push)(struct Queue *queue, const void *data);
 } Queue;
 
-static inline const void *Queue_pop(const Queue *queue)
+static inline const void *Queue_pop(Queue *queue)
 {
     if (queue->pop) {
         return queue->pop(queue);
@@ -19,7 +19,7 @@ static inline const void *Queue_pop(const Queue *queue)
     return NULL;
 }
 
-static inline int Queue_push(const Queue *queue, const void *data)
+static inline int Queue_push(Queue *queue, const void *data)
 {
     if (queue->push) {
         return queue->push(queue, data);
