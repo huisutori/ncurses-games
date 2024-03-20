@@ -92,8 +92,6 @@ delete_cells:
     for (int i = 0; i < num_cols; i++) {
         if (map->cells[i]) {
             free(map->cells[i]);
-        } else {
-            break;
         }
     }
     if (map->cells) {
