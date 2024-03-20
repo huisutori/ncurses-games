@@ -12,6 +12,8 @@ SUBDIRS = common \
 LIBS = -lncurses \
 	   -lpthread
 
+INCS = -I./.
+
 SRCS = $(wildcard *.c) \
        $(foreach dir, $(SUBDIRS), $(wildcard $(dir)/*.c))
 
