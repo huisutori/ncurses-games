@@ -4,14 +4,24 @@
  */
 #pragma once
 
-#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+#include "mine_sweeper_settings.h"
 #include "mine_cell.h"
 
-typedef struct MineMap MineMap;
+typedef void (*MineMapUpdateHandler)(const MineCell *cell);
+typedef void (*MineMapResultHandler)(bool is_success);
 
-MineMap *MineMap_new(uint8_t num_rows, uint8_t num_cols, 
-                     uint8_t num_bombs);
-void MineMap_delete(MineMap *map);
+int MineMap_init(const MineSweeperSettings *settings,  
+                 MineMapUpdateHandler on_update, 
+                 MineMapResultHandler on_result);
+void MineMap_deinit(void);
 
-bool MineMap_open_cell(MineMap *map, uint8_t x, uint8_t y);
-void MineMap_flag_cell(MineMap *map, uint8_t x, uint8_t y);
+void MineMap_reset(void);
+
+void MineMap_open_cell(const MineCell *cell);
+void MineMap_flag_cell(const MineCell *cell);
+void MineMap_unflag_cell(const MineCell *cell);
+
+const MineCell *MineMap_get_cell(size_t x, size_t y);
+void MineMap_get_size(size_t *num_rows, size_t *num_cols);

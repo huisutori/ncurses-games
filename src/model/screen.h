@@ -4,11 +4,10 @@
  */
 #pragma once
 
-#include "common/thread.h"
 #include "controller.h"
 
 typedef struct {
-    Controller *(*create_controller)(void);
+    Controller *(*create_controller)(void *ctx);
     void (*destroy_controller)(Controller *);
 } Screen;
 
@@ -25,14 +24,12 @@ typedef enum {
 } ScreenColor;
 
 #define SCREEN_COLOR_BACKGROUND_DEFAULT SCREEN_COLOR_YELLOW
-#define SCREEN_COLOR_FOREGROUND_DEFAULT SCREEN_COLOR_RED
+#define SCREEN_COLOR_FOREGROUND_DEFAULT SCREEN_COLOR_DARK_BLUE
 
-int Screen_init(const Screen *main_screen);
+int Screen_init(const Screen *main_screen, void *ctx);
 void Screen_deinit(void);
 
-void Screen_set_main(void);
-void Screen_set_current(const Screen *screen);
+void Screen_set_main(void *ctx);
+void Screen_set_current(const Screen *screen, void *ctx);
 
 void Screen_get_size(size_t *width, size_t *height);
-
-extern Thread *screen_thread;

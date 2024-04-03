@@ -5,12 +5,14 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include "common/thread.h"
 #include "screen.h"
 
-Thread *screen_thread;
+static Thread *screen_thread;
 
 static const Screen *main_screen;
 static const Screen *current_screen;
+static void *current_screen_ctx;
 static Controller *controller;
 
 static enum {
@@ -22,7 +24,7 @@ static enum {
 static const Screen *idle_step(const Screen *screen)
 {
     if (screen->create_controller) {
-        controller = screen->create_controller();
+        controller = screen->create_controller(current_screen_ctx);
     }
     state = STATE_RUNNING;
     
@@ -65,10 +67,11 @@ static void screen_thread_func(void *arg)
     }
 }
 
-int Screen_init(const Screen *_main_screen)
+int Screen_init(const Screen *_main_screen, void *ctx)
 {
     main_screen = _main_screen;
     current_screen = _main_screen;
+    current_screen_ctx = ctx;
     
     screen_thread = Thread_new(screen_thread_func, NULL);
     if (!screen_thread) {
@@ -82,7 +85,6 @@ void Screen_deinit(void)
 {
     if (screen_thread) {
         Thread_delete(screen_thread);
-        
         if (state == STATE_RUNNING) {
             if (current_screen->destroy_controller) {
                 current_screen->destroy_controller(controller);
@@ -93,9 +95,10 @@ void Screen_deinit(void)
     }
 }
 
-void Screen_set_main(void)
+void Screen_set_main(void *ctx)
 {
     current_screen = main_screen;
+    current_screen_ctx = ctx;
     
     Event event = {
         .type = EVENT_SCREEN,
@@ -106,9 +109,10 @@ void Screen_set_main(void)
     Event_push(&event);
 }
 
-void Screen_set_current(const Screen *screen)
+void Screen_set_current(const Screen *screen, void *ctx)
 {
     current_screen = screen;
+    current_screen_ctx = ctx;
     
     Event event = {
         .type = EVENT_SCREEN,
