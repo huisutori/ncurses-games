@@ -28,6 +28,7 @@ typedef struct {
 } EventKey;
 
 typedef enum {
+    EVENT_MOUSE_MOVE,
     EVENT_MOUSE_LEFT_CLICK,
     EVENT_MOUSE_RIGHT_CLICK,
 } EventMouseType;

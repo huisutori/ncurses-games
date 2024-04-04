@@ -3,174 +3,230 @@
  *  License: MIT
  */
 #include <stdlib.h>
-#include <stdio.h>
+#include <assert.h>
 #include <time.h>
 #include "mine_map.h"
 
-typedef struct MineMap {
-    uint8_t num_rows;
-    uint8_t num_cols;
-    MineCell **cells;
-} MineMap;
+static const MineSweeperSettings *settings;
+static bool is_finished;
 
-static void implant_bombs(MineMap *map, uint8_t num_bombs)
+static MineMapUpdateHandler on_update;
+static MineMapResultHandler on_result;
+
+static MineCell **cells;
+static size_t num_cells;
+static size_t num_opened_cells;
+
+static const int dx[8] = { -1, 0, 1, -1, 1, -1, 0, 1 };
+static const int dy[8] = { -1, -1, -1, 0, 0, 1, 1, 1 };
+
+static void implant_bombs(void)
 {
     srand(time(NULL));
  
-    uint8_t bombs = 0;
-    while (bombs < num_bombs) {
-        uint8_t x = rand() % map->num_rows;
-        uint8_t y = rand() % map->num_cols;
+    size_t bombs = 0;
+    while (bombs < settings->num_bombs) {
+        size_t x = rand() % settings->num_cols;
+        size_t y = rand() % settings->num_rows;
 
-        if (!map->cells[x][y].is_bomb) {
-            map->cells[x][y].is_bomb = true;
+        if (!cells[x][y].is_bomb) {
+            cells[x][y].is_bomb = true;
             bombs++;
         }
     }
 }
 
-static void update_bomb_count(MineMap *map)
+static void update_bomb_count(void)
 {
-    static const int dx[8] = { -1, 0, 1, -1, 1, -1, 0, 1 };
-    static const int dy[8] = { -1, -1, -1, 0, 0, 1, 1, 1 };
-
-    for (int i = 0; i < map->num_rows; i++) {
-        for (int j = 0; j < map->num_cols; j++) {
+    for (int i = 0; i < settings->num_cols; i++) {
+        for (int j = 0; j < settings->num_rows; j++) {
             for (int k = 0; k < 8; k++) {
                 int x = i + dx[k];
                 int y = j + dy[k];
-                if (x < 0 || y < 0 || x >= map->num_rows || y >= map->num_cols) {
+                if (x < 0 || y < 0 || x >= settings->num_cols || y >= settings->num_rows) {
                     continue;
                 }
-                if (map->cells[x][y].is_bomb) {
-                    map->cells[i][j].bomb_count++;
+                if (cells[x][y].is_bomb) {
+                    cells[i][j].bomb_count++;
                 }
             }
         }
     }
 }
 
-static void init_map(MineMap *map, uint8_t num_bombs)
+static void init_map(void)
 {
-    for (int i = 0; i < map->num_rows; i++) {
-        for (int j = 0; j < map->num_cols; j++) {
-            map->cells[i][j].state = MINE_CELL_UNKNOWN;
-            map->cells[i][j].bomb_count = 0;
-            map->cells[i][j].is_bomb = false;
+    num_opened_cells = 0;
+    is_finished = false;
+    for (int i = 0; i < settings->num_cols; i++) {
+        for (int j = 0; j < settings->num_rows; j++) {
+            cells[i][j].state = MINE_CELL_UNKNOWN;
+            cells[i][j].x = i;
+            cells[i][j].y = j;
+            cells[i][j].bomb_count = 0;
+            cells[i][j].is_bomb = false;
         }
     }
-    
-    implant_bombs(map, num_bombs);
-    update_bomb_count(map);
+    implant_bombs();
+    update_bomb_count();
 }
 
-MineMap *MineMap_new(uint8_t num_rows, uint8_t num_cols, uint8_t num_bombs)
+int MineMap_init(const MineSweeperSettings *_settings,  
+                 MineMapUpdateHandler _on_update, 
+                 MineMapResultHandler _on_result)
 {
-    MineMap *map = calloc(1, sizeof(MineMap));
-    if (!map) {
+    assert(_settings);
+    assert(_on_update);
+    assert(_on_result);
+
+    settings = _settings;
+    
+    on_update = _on_update;
+    on_result = _on_result;
+    
+    num_cells = settings->num_rows * settings->num_cols;
+
+    cells = calloc(1, sizeof(MineCell *) * settings->num_cols);
+    if (!cells) {
+        return -1;
+    }
+    
+    for (int i = 0; i < settings->num_cols; i++) {
+        cells[i] = calloc(1, sizeof(MineCell) * settings->num_rows);
+        if (!cells[i]) {
+            goto error;
+        }
+    }
+    init_map();
+
+    return 0;
+
+error:
+    for (int i = 0; i < settings->num_cols; i++) {
+        if (cells[i]) {
+            free(cells[i]);
+        }
+    }
+    free(cells);
+
+    return -1;
+}
+
+void MineMap_deinit(void)
+{
+    for (int i = 0; i < settings->num_cols; i++) {
+        free(cells[i]);
+    }
+    free(cells);
+}
+
+void MineMap_reset(void)
+{
+    init_map();
+}
+
+const MineCell *MineMap_get_cell(size_t x, size_t y)
+{
+    if (x >= settings->num_cols || y >= settings->num_rows) {
         return NULL;
     }
-    map->num_rows = num_rows;
-    map->num_cols = num_cols;
-    
-    map->cells = calloc(1, sizeof(MineCell *) * num_cols);
-    if (!map->cells) {
-        goto delete_map;
-    }
-    for (int i = 0; i < num_cols; i++) {
-        map->cells[i] = calloc(1, sizeof(MineCell) * num_rows);
-        if (!map->cells[i]) {
-            goto delete_cells;
-        }
-    }
-    
-    init_map(map, num_bombs);
-    
-    return map;
-
-delete_cells:
-    for (int i = 0; i < num_cols; i++) {
-        if (map->cells[i]) {
-            free(map->cells[i]);
-        }
-    }
-    if (map->cells) {
-        free(map->cells);
-    }
-
-delete_map:
-    free(map);
-    
-    return NULL;
+    return &cells[x][y];
 }
 
-void MineMap_delete(MineMap *map)
+static void open_cell(int x, int y)
 {
-    for (int i = 0; i < map->num_cols; i++) {
-        free(map->cells[i]);
-    }
-    free(map->cells);
-    free(map);
-}
-
-static void open_cell(MineMap *map, int x, int y)
-{
-    if (x < 0 || y < 0 || x >= map->num_rows || y >= map->num_cols) {
+    if (x < 0 || y < 0 || x >= settings->num_cols || y >= settings->num_rows) {
         return;
     }
-    if (map->cells[x][y].state != MINE_CELL_UNKNOWN) {
+    if (cells[x][y].state != MINE_CELL_UNKNOWN) {
         return;
     }
-    if (map->cells[x][y].is_bomb) {
+    if (cells[x][y].is_bomb) {
         return;
     }
     
-    map->cells[x][y].state = MINE_CELL_OPENED;
-    if (map->cells[x][y].bomb_count != 0) {
+    cells[x][y].state = MINE_CELL_OPENED;
+    on_update(&cells[x][y]);
+    
+    num_opened_cells++;
+    
+    if (cells[x][y].bomb_count != 0) {
         return;
     }
 
-    static const int dx[4] = { 0, 0, -1, 1};
-    static const int dy[4] = { -1, 1, 0, 0};
-    
-    for (int i = 0; i < 4; i++) {
-        open_cell(map, x + dx[i], y + dy[i]);
+    for (int i = 0; i < 8; i++) {
+        open_cell(x + dx[i], y + dy[i]);
     }
 }
 
-static void open_map(MineMap *map)
+static void open_map(void)
 {
-    for (int i = 0; i < map->num_rows; i++) {
-        for (int j = 0; j < map->num_cols; j++) {
-            map->cells[i][j].state = MINE_CELL_OPENED;
+    for (int i = 0; i < settings->num_cols; i++) {
+        for (int j = 0; j < settings->num_rows; j++) {
+            if (cells[i][j].is_bomb) {
+                cells[i][j].state = MINE_CELL_OPENED;
+                on_update(&cells[i][j]);
+                num_opened_cells++;
+            } else {
+                if (cells[i][j].state == MINE_CELL_FLAGGED) {
+                    cells[i][j].state = MINE_CELL_ERROR;
+                    on_update(&cells[i][j]);
+                }
+            }
         }
     }
 }
 
-bool MineMap_open_cell(MineMap *map, uint8_t x, uint8_t y)
+void MineMap_open_cell(const MineCell *cell)
 {
-    if (x >= map->num_rows || y >= map->num_cols) {
-        return true;
+    if (is_finished) {
+        return;
     }
-    if (map->cells[x][y].state != MINE_CELL_UNKNOWN) {
-        return true;
-    }
-    if (map->cells[x][y].is_bomb) {
-        open_map(map);
-        return false;
-    }
-    open_cell(map, x, y);
-    
-    return true;
 
+    size_t x = cell->x;
+    size_t y = cell->y;
+
+    if (cell->is_bomb) {
+        open_map();
+
+        is_finished = true;
+        on_result(false);
+    } else {
+        open_cell((int)x, (int)y);
+        
+        if ((num_cells - settings->num_bombs) == num_opened_cells) {
+            is_finished = true;
+            on_result(true);
+        }
+    }
 }
-void MineMap_flag_cell(MineMap *map, uint8_t x, uint8_t y)
+
+void MineMap_flag_cell(const MineCell *cell)
 {
-    if (x >= map->num_rows || y >= map->num_cols) {
+    if (cell->state != MINE_CELL_UNKNOWN) {
         return;
     }
-    if (map->cells[x][y].state != MINE_CELL_UNKNOWN) {
+    size_t x = cell->x;
+    size_t y = cell->y;
+    
+    cells[x][y].state = MINE_CELL_FLAGGED;
+    on_update(cell);
+}
+
+void MineMap_unflag_cell(const MineCell *cell)
+{
+    if (cell->state != MINE_CELL_FLAGGED) {
         return;
     }
-    map->cells[x][y].state = MINE_CELL_FLAGGED;
+    size_t x = cell->x;
+    size_t y = cell->y;
+    
+    cells[x][y].state = MINE_CELL_UNKNOWN;
+    on_update(cell);
+}
+
+void MineMap_get_size(size_t *num_rows, size_t *num_cols)
+{
+    *num_rows = settings->num_rows;
+    *num_cols = settings->num_cols;
 }

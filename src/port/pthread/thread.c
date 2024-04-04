@@ -3,11 +3,13 @@
  *  License: MIT
  */
 #include <stdlib.h>
+#include <stdbool.h>
 #include <pthread.h>
 #include "common/thread.h"
 
 typedef struct Thread {
     pthread_t super;
+    bool is_detached;
 } Thread;
 
 Thread *Thread_new(ThreadFunc func, void *arg)
@@ -16,6 +18,7 @@ Thread *Thread_new(ThreadFunc func, void *arg)
     if (!thread) {
         return NULL;
     }
+    thread->is_detached = false;
     
     int err = pthread_create((pthread_t *)thread, NULL, 
                              (void * (*)(void *))func, arg);
@@ -33,6 +36,9 @@ void Thread_delete(Thread *thread)
         pthread_exit(NULL);
     } else {
         pthread_cancel(*(pthread_t *)thread);
+        if (!thread->is_detached) {
+            pthread_join(*(pthread_t *)thread, NULL);
+        }
     }
     free(thread);
 }
@@ -52,5 +58,7 @@ int Thread_detach(Thread *thread)
     if (err) {
         return -1;
     }
+    thread->is_detached = true;
+    
     return 0;
 }

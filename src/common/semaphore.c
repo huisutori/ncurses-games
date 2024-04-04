@@ -24,8 +24,10 @@ Semaphore *Semaphore_new(void)
     }
     
     sprintf(sem->name, "sem_%d", id++);
+    sem_unlink(sem->name);
+    
     sem->handle = sem_open(sem->name, O_CREAT, 0600, 1);
-    if (!sem->handle) {
+    if (sem->handle == SEM_FAILED) {
         free(sem);
         return NULL;
     }

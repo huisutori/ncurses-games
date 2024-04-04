@@ -8,6 +8,7 @@
 #include "utils/priority_queue.h"
 #include "thread.h"
 #include "semaphore.h"
+#include "mutex.h"
 #include "timer.h"
 
 #define TIMER_QUEUE_SIZE 10
@@ -23,8 +24,10 @@ typedef struct Timer {
 
 static Thread *timer_thread;
 static Semaphore *timer_sem;
+static Mutex *timer_mutex;
 static PQueue *timer_queue;
 
+static size_t num_timers = 0;
 static bool is_running = false;
 
 static void on_alarm(int unused)
@@ -45,7 +48,7 @@ static void schedule_alarm(uint32_t timeout_ms)
     setitimer(ITIMER_REAL, &interval_time, NULL);
 }
 
-static uint32_t get_monotonic_time_ms(void)
+static uint32_t get_current_time_ms(void)
 {
     struct timespec time;
     clock_gettime(CLOCK_REALTIME, &time);
@@ -59,7 +62,7 @@ static uint32_t get_monotonic_time_ms(void)
 
 static bool is_timer_expired(Timer *timer)
 {
-    return get_monotonic_time_ms() >= timer->expire_timeout_ms;
+    return (get_current_time_ms() >= timer->expire_timeout_ms);
 }
 
 static void timer_thread_func(void *arg)
@@ -72,17 +75,17 @@ static void timer_thread_func(void *arg)
         Timer *timer = PQueue_peek(timer_queue);
         while (timer && is_timer_expired(timer)) {
             timer = PQueue_pop(timer_queue);
-            timer->is_running = false;
             
             if (timer->callback) {
                 timer->callback(timer->ctx);
             }
             
             if (timer->is_periodic) {
-                timer->expire_timeout_ms = get_monotonic_time_ms() +
+                timer->expire_timeout_ms = get_current_time_ms() +
                                            timer->timeout_ms;
                 PQueue_push(timer_queue, timer);
-                timer->is_running = true;
+            } else {
+                timer->is_running = false;
             }
             
             timer = PQueue_peek(timer_queue);
@@ -90,7 +93,7 @@ static void timer_thread_func(void *arg)
         
         timer = PQueue_peek(timer_queue);
         if (timer) {
-            schedule_alarm(timer->expire_timeout_ms - get_monotonic_time_ms());
+            schedule_alarm(timer->expire_timeout_ms - get_current_time_ms());
         }
     }
 }
@@ -128,7 +131,7 @@ error_thread:
     Semaphore_delete(timer_sem);
 error_sem:
     PQueue_delete(timer_queue);
- 
+    
     return -1;
 }
 
@@ -151,6 +154,10 @@ Timer *Timer_new(TimerCallback callback, void *ctx)
         .is_running = false,
     };
     
+    if (num_timers++ == 0) {
+        timer_mutex = Mutex_new();
+    }
+    
     return timer;
 }
 
@@ -160,10 +167,16 @@ void Timer_delete(Timer *timer)
         Timer_stop(timer);
     }
     free(timer);
+    
+    if (--num_timers == 0) {
+        Mutex_delete(timer_mutex);
+    }
 }
 
 int Timer_start(Timer *timer, uint32_t timeout_ms, bool is_periodic)
 {
+    Mutex_lock(timer_mutex);
+
     if (!is_running) {
         int err = start_running();
         if (err) {
@@ -178,7 +191,7 @@ int Timer_start(Timer *timer, uint32_t timeout_ms, bool is_periodic)
     }
     
     timer->timeout_ms = timeout_ms;
-    timer->expire_timeout_ms = get_monotonic_time_ms() + timeout_ms;
+    timer->expire_timeout_ms = get_current_time_ms() + timeout_ms;
     timer->is_periodic = is_periodic;
 
     PQueue_push(timer_queue, timer);
@@ -189,11 +202,15 @@ int Timer_start(Timer *timer, uint32_t timeout_ms, bool is_periodic)
         schedule_alarm(timeout_ms);
     }
 
+    Mutex_unlock(timer_mutex);
+
     return 0;
 }
 
 void Timer_stop(Timer *timer)
 {
+    Mutex_lock(timer_mutex);
+
     if (timer->is_running) {
         PQueue_erase(timer_queue, timer);
         timer->is_running = false;
@@ -203,4 +220,11 @@ void Timer_stop(Timer *timer)
         stop_running();
         is_running = false;
     }
+    
+    Mutex_unlock(timer_mutex);
+}
+
+bool Timer_is_running(Timer *timer)
+{
+    return timer->is_running;
 }

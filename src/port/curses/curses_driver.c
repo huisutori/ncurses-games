@@ -5,11 +5,14 @@
 #include <sys/ioctl.h>
 #include <signal.h>
 #include <unistd.h>
+#include <stdio.h>
 #include <ncurses.h>
 #include "model/event.h"
+#include "common/thread.h"
+#include "common/timer.h"
 #include "curses_driver.h"
 
-Thread *curses_driver_thread;
+static Thread *curses_driver_thread;
 
 #define COLOR_SCALE(hex) (hex / (float)0xff * 1000) 
 
@@ -19,11 +22,29 @@ static struct {
     [SCREEN_COLOR_RED]        = { COLOR_SCALE(0xd2), COLOR_SCALE(0x14), COLOR_SCALE(0x04) },
     [SCREEN_COLOR_ORANGE]     = { COLOR_SCALE(0xfc), COLOR_SCALE(0x6a), COLOR_SCALE(0x03) },
     [SCREEN_COLOR_YELLOW]     = { COLOR_SCALE(0xff), COLOR_SCALE(0xbf), COLOR_SCALE(0x00) },
-    [SCREEN_COLOR_GREEN]      = { COLOR_SCALE(0x03), COLOR_SCALE(0xac), COLOR_SCALE(0x13) },
+    [SCREEN_COLOR_GREEN]      = { COLOR_SCALE(0x22), COLOR_SCALE(0x8b), COLOR_SCALE(0x22) },
     [SCREEN_COLOR_BLUE]       = { COLOR_SCALE(0x2e), COLOR_SCALE(0x59), COLOR_SCALE(0x84) },
     [SCREEN_COLOR_DARK_BLUE]  = { COLOR_SCALE(0x1c), COLOR_SCALE(0x2e), COLOR_SCALE(0x4a) },
     [SCREEN_COLOR_PURPLE]     = { COLOR_SCALE(0x8f), COLOR_SCALE(0x00), COLOR_SCALE(0xff) },
 };
+
+
+static Timer *screen_event_timer;
+static size_t screen_width, screen_height;
+
+static void invoke_screen_event(void *arg)
+{
+    Event event = {
+        .type = EVENT_SCREEN,
+        .screen = {
+            .type = EVENT_SCREEN_RESIZE,
+            .width = screen_width,
+            .height = screen_height,
+        },
+    };
+
+    Event_push(&event);
+}
 
 static void on_terminal_resize(int unused)
 {
@@ -31,25 +52,21 @@ static void on_terminal_resize(int unused)
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &size);
     
     resizeterm(size.ws_row, size.ws_col);
-    refresh();
     
     int dummy = 0;
     ungetch(dummy);
-    
-    Event event = {
-        .type = EVENT_SCREEN,
-        .screen = {
-            .type = EVENT_SCREEN_RESIZE,
-            .width = size.ws_col,
-            .height = size.ws_row,
-        },
-    };
-    Event_push(&event);
+
+    screen_width = size.ws_col;
+    screen_height = size.ws_row;
+
+    if (!Timer_is_running(screen_event_timer)) {
+        Timer_start(screen_event_timer, 500, false);
+    }
 }
 
 static void curses_driver_thread_func(void *arg)
 {
-    while (1) {
+    while (!isendwin()) {
         Event event;
         int ch = getch();
         
@@ -60,11 +77,19 @@ static void curses_driver_thread_func(void *arg)
             event.type = EVENT_MOUSE;
             event.mouse.x = mouse_event.x;
             event.mouse.y = mouse_event.y;
-            
+
             if (mouse_event.bstate == BUTTON1_CLICKED) {
                 event.mouse.type = EVENT_MOUSE_LEFT_CLICK;
-            } else if (mouse_event.bstate == BUTTON2_CLICKED) {
+            } else if (mouse_event.bstate == BUTTON3_CLICKED) {
                 event.mouse.type = EVENT_MOUSE_RIGHT_CLICK;
+            } else {
+                event.mouse.type = EVENT_MOUSE_MOVE;
+                static int mouse_x, mouse_y;
+                if (event.mouse.x == mouse_x && event.mouse.y == mouse_y) {
+                    continue;
+                }
+                mouse_x = event.mouse.x;
+                mouse_y = event.mouse.y;
             }
         } else {
             event.type = EVENT_KEY;
@@ -78,7 +103,7 @@ static void curses_driver_thread_func(void *arg)
                 event.key.type = EVENT_KEY_LEFT;
             } else if (ch == KEY_RIGHT) {
                 event.key.type = EVENT_KEY_RIGHT;
-            } else if (ch == KEY_ENTER) {
+            } else if (ch == KEY_ENTER || ch == '\n') {
                 event.key.type = EVENT_KEY_ENTER;
             } else if (ch == KEY_EXIT) {
                 event.key.type = EVENT_KEY_ESC;
@@ -92,13 +117,14 @@ static void curses_driver_thread_func(void *arg)
 }
 
 int CursesDriver_init(void)
-{
+{   
     initscr();
     noecho();
     curs_set(0);
     cbreak();
     keypad(stdscr, true);
-    mousemask(ALL_MOUSE_EVENTS, NULL);
+    mousemask(BUTTON1_CLICKED | BUTTON3_CLICKED | REPORT_MOUSE_POSITION, NULL);
+    printf("\033[?1003h\n");
     signal(SIGWINCH, on_terminal_resize);
     
     start_color();
@@ -119,11 +145,20 @@ int CursesDriver_init(void)
         return -1;
     }
     
+    screen_event_timer = Timer_new(invoke_screen_event, NULL);
+    if (!screen_event_timer) {
+        Thread_delete(curses_driver_thread);
+        return -2;
+    }
+    
     return 0;
 }
 
 void CursesDriver_deinit(void)
 {
+    if (screen_event_timer) {
+        Timer_delete(screen_event_timer);
+    }
     if (curses_driver_thread) {
         Thread_delete(curses_driver_thread);
     }
